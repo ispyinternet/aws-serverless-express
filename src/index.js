@@ -59,7 +59,7 @@ function mapApiGatewayEventToHttpRequest(event, context, socketPath) {
     path: getPathWithQueryStringParams(event),
     headers,
     //socketPath
-    protocol: 'http', //`${headers['X-Forwarded-Proto']}:`,
+    protocol: 'http:', //`${headers['X-Forwarded-Proto']}:`,
     host: '127.0.0.1',
     hostname: 'localhost', //headers.Host, // Alias for host
     port: process.env.PORT // headers['X-Forwarded-Port']
