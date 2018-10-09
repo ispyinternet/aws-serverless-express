@@ -1,6 +1,6 @@
 # AWS Serverless Express
 
-# !! Modified Version to use PORT instead of SOCKET FILE so can use with SAPPER !!
+## ! Modified Version to use PORT instead of SOCKET FILE so can use with SAPPER !
 
 Note: Looks for process.env.PORT to select port.
 
