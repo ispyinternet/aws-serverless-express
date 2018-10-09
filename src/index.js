@@ -134,7 +134,7 @@ function forwardLibraryErrorResponseToApiGateway(error, resolver) {
 
 function forwardRequestToNodeServer(server, event, context, resolver) {
   try {
-    const requestOptions = mapApiGatewayEventToHttpRequest(event, context, getPort())
+    const requestOptions = mapApiGatewayEventToHttpRequest(event, context, process.env.PORT)
     const req = http.request(requestOptions, (response) => forwardResponseToApiGateway(server, response, resolver))
     if (event.body) {
       const body = getEventBody(event)
@@ -151,10 +151,10 @@ function forwardRequestToNodeServer(server, event, context, resolver) {
 }
 
 function startServer(server) {
-  return server.listen(getPort())
+  return server.listen(process.env.PORT)
 }
 
-function getPort() {
+function nextPort() {
   /* istanbul ignore if */
   /* only running tests on Linux; Window support is for local dev only */
   PORT++;
@@ -181,6 +181,7 @@ function createServer(requestListener, serverListenCallback, binaryTypes) {
       /* istanbul ignore else */
       if (error.code === 'EADDRINUSE') {
         console.warn(`WARNING: Attempting to listen on port ${PORT}, but it is already in use. This is likely as a result of a previous invocation error or timeout. Check the logs for the invocation(s) immediately prior to this for root cause, and consider increasing the timeout and/or cpu/memory allocation if this is purely as a result of a timeout. aws-serverless-express will restart the Node.js server listening on a new port and continue with this request.`)
+        nextPort();
         return server.close(() => startServer(server))
       } else {
         console.log('ERROR: server error')
