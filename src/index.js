@@ -18,27 +18,30 @@ const url = require('url')
 const binarycase = require('binary-case')
 const isType = require('type-is')
 
-function getPathWithQueryStringParams (event) {
+let PORT = 1023;
+
+function getPathWithQueryStringParams(event) {
   return url.format({ pathname: event.path, query: event.queryStringParameters })
 }
-function getEventBody (event) {
+
+function getEventBody(event) {
   return Buffer.from(event.body, event.isBase64Encoded ? 'base64' : 'utf8')
 }
 
-function clone (json) {
+function clone(json) {
   return JSON.parse(JSON.stringify(json))
 }
 
-function getContentType (params) {
+function getContentType(params) {
   // only compare mime type; ignore encoding part
   return params.contentTypeHeader ? params.contentTypeHeader.split(';')[0] : ''
 }
 
-function isContentTypeBinaryMimeType (params) {
+function isContentTypeBinaryMimeType(params) {
   return params.binaryMimeTypes.length > 0 && !!isType.is(params.contentType, params.binaryMimeTypes)
 }
 
-function mapApiGatewayEventToHttpRequest (event, context, socketPath) {
+function mapApiGatewayEventToHttpRequest(event, context, port) {
   const headers = Object.assign({}, event.headers)
 
   // NOTE: API Gateway is not setting Content-Length header on requests even when they have a body
@@ -57,15 +60,14 @@ function mapApiGatewayEventToHttpRequest (event, context, socketPath) {
     method: event.httpMethod,
     path: getPathWithQueryStringParams(event),
     headers,
-    socketPath
-    // protocol: `${headers['X-Forwarded-Proto']}:`,
-    // host: headers.Host,
-    // hostname: headers.Host, // Alias for host
-    // port: headers['X-Forwarded-Port']
+    protocol: 'http:',
+    host: '127.0.0.1',
+    hostname: 'localhost',
+    port
   }
 }
 
-function forwardResponseToApiGateway (server, response, resolver) {
+function forwardResponseToApiGateway(server, response, resolver) {
   let buf = []
 
   response
@@ -100,13 +102,13 @@ function forwardResponseToApiGateway (server, response, resolver) {
       const contentType = getContentType({ contentTypeHeader: headers['content-type'] })
       const isBase64Encoded = isContentTypeBinaryMimeType({ contentType, binaryMimeTypes: server._binaryTypes })
       const body = bodyBuffer.toString(isBase64Encoded ? 'base64' : 'utf8')
-      const successResponse = {statusCode, body, headers, isBase64Encoded}
+      const successResponse = { statusCode, body, headers, isBase64Encoded }
 
       resolver.succeed({ response: successResponse })
     })
 }
 
-function forwardConnectionErrorResponseToApiGateway (error, resolver) {
+function forwardConnectionErrorResponseToApiGateway(error, resolver) {
   console.log('ERROR: aws-serverless-express connection error')
   console.error(error)
   const errorResponse = {
@@ -118,7 +120,7 @@ function forwardConnectionErrorResponseToApiGateway (error, resolver) {
   resolver.succeed({ response: errorResponse })
 }
 
-function forwardLibraryErrorResponseToApiGateway (error, resolver) {
+function forwardLibraryErrorResponseToApiGateway(error, resolver) {
   console.log('ERROR: aws-serverless-express error')
   console.error(error)
   const errorResponse = {
@@ -130,9 +132,9 @@ function forwardLibraryErrorResponseToApiGateway (error, resolver) {
   resolver.succeed({ response: errorResponse })
 }
 
-function forwardRequestToNodeServer (server, event, context, resolver) {
+function forwardRequestToNodeServer(server, event, context, resolver) {
   try {
-    const requestOptions = mapApiGatewayEventToHttpRequest(event, context, getSocketPath(server._socketPathSuffix))
+    const requestOptions = mapApiGatewayEventToHttpRequest(event, context, getPort())
     const req = http.request(requestOptions, (response) => forwardResponseToApiGateway(server, response, resolver))
     if (event.body) {
       const body = getEventBody(event)
@@ -148,28 +150,24 @@ function forwardRequestToNodeServer (server, event, context, resolver) {
   }
 }
 
-function startServer (server) {
-  return server.listen(getSocketPath(server._socketPathSuffix))
+function startServer(server) {
+  return server.listen(getPort())
 }
 
-function getSocketPath (socketPathSuffix) {
-  /* istanbul ignore if */ /* only running tests on Linux; Window support is for local dev only */
-  if (/^win/.test(process.platform)) {
-    const path = require('path')
-    return path.join('\\\\?\\pipe', process.cwd(), `server-${socketPathSuffix}`)
-  } else {
-    return `/tmp/server-${socketPathSuffix}.sock`
-  }
+function getPort() {
+  /* istanbul ignore if */
+  /* only running tests on Linux; Window support is for local dev only */
+  PORT++;
+  process.env.PORT = PORT;
+  return PORT;
 }
 
-function getRandomString () {
+function getRandomString() {
   return Math.random().toString(36).substring(2, 15)
 }
 
-function createServer (requestListener, serverListenCallback, binaryTypes) {
+function createServer(requestListener, serverListenCallback, binaryTypes) {
   const server = http.createServer(requestListener)
-
-  server._socketPathSuffix = getRandomString()
   server._binaryTypes = binaryTypes ? binaryTypes.slice() : []
   server.on('listening', () => {
     server._isListening = true
@@ -177,13 +175,12 @@ function createServer (requestListener, serverListenCallback, binaryTypes) {
     if (serverListenCallback) serverListenCallback()
   })
   server.on('close', () => {
-    server._isListening = false
-  })
+      server._isListening = false
+    })
     .on('error', (error) => {
       /* istanbul ignore else */
       if (error.code === 'EADDRINUSE') {
-        console.warn(`WARNING: Attempting to listen on socket ${getSocketPath(server._socketPathSuffix)}, but it is already in use. This is likely as a result of a previous invocation error or timeout. Check the logs for the invocation(s) immediately prior to this for root cause, and consider increasing the timeout and/or cpu/memory allocation if this is purely as a result of a timeout. aws-serverless-express will restart the Node.js server listening on a new port and continue with this request.`)
-        server._socketPathSuffix = getRandomString()
+        console.warn(`WARNING: Attempting to listen on port ${PORT}, but it is already in use. This is likely as a result of a previous invocation error or timeout. Check the logs for the invocation(s) immediately prior to this for root cause, and consider increasing the timeout and/or cpu/memory allocation if this is purely as a result of a timeout. aws-serverless-express will restart the Node.js server listening on a new port and continue with this request.`)
         return server.close(() => startServer(server))
       } else {
         console.log('ERROR: server error')
@@ -194,7 +191,7 @@ function createServer (requestListener, serverListenCallback, binaryTypes) {
   return server
 }
 
-function proxy (server, event, context, resolutionMode, callback) {
+function proxy(server, event, context, resolutionMode, callback) {
   // DEPRECATED: Legacy support
   if (!resolutionMode) {
     const resolver = makeResolver({ context, resolutionMode: 'CONTEXT_SUCCEED' })
@@ -230,16 +227,20 @@ function proxy (server, event, context, resolutionMode, callback) {
   }
 }
 
-function makeResolver (params/* {
-  context,
-  callback,
-  promise,
-  resolutionMode
-} */) {
+function makeResolver(params
+  /* {
+    context,
+    callback,
+    promise,
+    resolutionMode
+  } */
+) {
   return {
-    succeed: (params2/* {
-      response
-    } */) => {
+    succeed: (params2
+      /* {
+            response
+          } */
+    ) => {
       if (params.resolutionMode === 'CONTEXT_SUCCEED') return params.context.succeed(params2.response)
       if (params.resolutionMode === 'CALLBACK') return params.callback(null, params2.response)
       if (params.resolutionMode === 'PROMISE') return params.promise.resolve(params2.response)
@@ -259,6 +260,5 @@ if (process.env.NODE_ENV === 'test') {
   exports.forwardLibraryErrorResponseToApiGateway = forwardLibraryErrorResponseToApiGateway
   exports.forwardRequestToNodeServer = forwardRequestToNodeServer
   exports.startServer = startServer
-  exports.getSocketPath = getSocketPath
   exports.makeResolver = makeResolver
 }
