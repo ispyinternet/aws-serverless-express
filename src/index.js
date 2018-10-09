@@ -17,6 +17,7 @@ const http = require('http')
 const url = require('url')
 const binarycase = require('binary-case')
 const isType = require('type-is')
+const PORT = process.env.PORT;
 
 function getPathWithQueryStringParams(event) {
   return url.format({ pathname: event.path, query: event.queryStringParameters })
@@ -39,7 +40,7 @@ function isContentTypeBinaryMimeType(params) {
   return params.binaryMimeTypes.length > 0 && !!isType.is(params.contentType, params.binaryMimeTypes)
 }
 
-function mapApiGatewayEventToHttpRequest(event, context, socketPath) {
+function mapApiGatewayEventToHttpRequest(event, context) {
   const headers = Object.assign({}, event.headers)
 
   // NOTE: API Gateway is not setting Content-Length header on requests even when they have a body
@@ -58,11 +59,10 @@ function mapApiGatewayEventToHttpRequest(event, context, socketPath) {
     method: event.httpMethod,
     path: getPathWithQueryStringParams(event),
     headers,
-    //socketPath
-    protocol: 'http:', //`${headers['X-Forwarded-Proto']}:`,
+    protocol: 'http:',
     host: '127.0.0.1',
-    hostname: 'localhost', //headers.Host, // Alias for host
-    port: process.env.PORT // headers['X-Forwarded-Port']
+    hostname: 'localhost',
+    port: PORT
   }
 }
 
@@ -133,7 +133,7 @@ function forwardLibraryErrorResponseToApiGateway(error, resolver) {
 
 function forwardRequestToNodeServer(server, event, context, resolver) {
   try {
-    const requestOptions = mapApiGatewayEventToHttpRequest(event, context, '') // getSocketPath(server._socketPathSuffix))
+    const requestOptions = mapApiGatewayEventToHttpRequest(event, context, '')
     const req = http.request(requestOptions, (response) => forwardResponseToApiGateway(server, response, resolver))
     if (event.body) {
       const body = getEventBody(event)
@@ -150,28 +150,13 @@ function forwardRequestToNodeServer(server, event, context, resolver) {
 }
 
 function startServer(server) {
-  return server.listen(process.env.PORT) //getSocketPath(server._socketPathSuffix))
-}
-
-function getSocketPath(socketPathSuffix) {
-  /* istanbul ignore if */
-  /* only running tests on Linux; Window support is for local dev only */
-  if (/^win/.test(process.platform)) {
-    const path = require('path')
-    return path.join('\\\\?\\pipe', process.cwd(), `server-${socketPathSuffix}`)
-  } else {
-    return `/tmp/server-${socketPathSuffix}.sock`
-  }
-}
-
-function getRandomString() {
-  return Math.random().toString(36).substring(2, 15)
+  return server.listen(PORT)
 }
 
 function createServer(requestListener, serverListenCallback, binaryTypes) {
+
   const server = http.createServer(requestListener)
 
-  server._socketPathSuffix = getRandomString()
   server._binaryTypes = binaryTypes ? binaryTypes.slice() : []
   server.on('listening', () => {
     server._isListening = true
@@ -184,10 +169,8 @@ function createServer(requestListener, serverListenCallback, binaryTypes) {
     .on('error', (error) => {
       /* istanbul ignore else */
       if (error.code === 'EADDRINUSE') {
-        //console.warn(`WARNING: Attempting to listen on socket ${getSocketPath(server._socketPathSuffix)}, but it is already in use. This is likely as a result of a previous invocation error or timeout. Check the logs for the invocation(s) immediately prior to this for root cause, and consider increasing the timeout and/or cpu/memory allocation if this is purely as a result of a timeout. aws-serverless-express will restart the Node.js server listening on a new port and continue with this request.`)
-        console.warn(`WARNING: Attempting to listen on socket ${process.env.PORT}, but it is already in use. This is likely as a result of a previous invocation error or timeout. Check the logs for the invocation(s) immediately prior to this for root cause, and consider increasing the timeout and/or cpu/memory allocation if this is purely as a result of a timeout. aws-serverless-express will restart the Node.js server listening on a new port and continue with this request.`)
-        server._socketPathSuffix = getRandomString()
-        return server.close(() => startServer(server))
+        console.warn(`WARNING: Attempting to listen on socket ${PORT}, but it is already in use. This is likely as a result of a previous invocation error or timeout. Check the logs for the invocation(s) immediately prior to this for root cause, and consider increasing the timeout and/or cpu/memory allocation if this is purely as a result of a timeout. aws-serverless-express will restart the Node.js server listening on a new port and continue with this request.`)
+        return false; // no retry
       } else {
         console.log('ERROR: server error')
         console.error(error)
@@ -266,6 +249,5 @@ if (process.env.NODE_ENV === 'test') {
   exports.forwardLibraryErrorResponseToApiGateway = forwardLibraryErrorResponseToApiGateway
   exports.forwardRequestToNodeServer = forwardRequestToNodeServer
   exports.startServer = startServer
-  exports.getSocketPath = getSocketPath
   exports.makeResolver = makeResolver
 }
